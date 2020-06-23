@@ -1,0 +1,119 @@
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: server-b-configmap-development
+  namespace: development
+data:
+  nginx.conf: |
+    worker_processes 1;
+
+    events { worker_connections 1024; }
+
+    http {
+        server_tokens off;
+
+        server {
+            root /usr/share/nginx/html/;
+            index index.html;
+            server_name localhost;
+            listen 80;
+        }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-b
+  namespace: development
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: server-b
+  template:
+    metadata:
+      labels:
+        app: server-b
+    spec:
+      containers:
+      - name: server-b
+        image: asia.gcr.io/airasia-cloud-sre-test/server-b:dev
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: server-b-volume
+          mountPath: /etc/nginx
+          readOnly: true
+        - name: server-b-log-volume
+          mountPath: /var/log/nginx
+        resources:  # must specify requests for CPU to autoscale
+          requests:
+            cpu: "250m"
+            memory: "100Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+      volumes:
+      - name: server-b-volume
+        configMap:
+          name: server-b-configmap-development
+          items:
+            - key: nginx.conf
+              path: nginx.conf
+      - name: server-b-log-volume
+        emptyDir: {}
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: server-b
+  namespace: development
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: server-b
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: AverageValue
+        averageValue: 100Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-b
+  namespace: development
+spec:
+  selector: 
+    app: server-b
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80

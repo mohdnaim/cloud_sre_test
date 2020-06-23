@@ -1,0 +1,82 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: server-a
+  namespace: development
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: server-a
+  template:
+    metadata:
+      labels:
+        app: server-a
+    spec:
+      containers:
+      - name: server-a
+        image: asia.gcr.io/airasia-cloud-sre-test/server-a:dev
+        ports:
+        - containerPort: 80
+        resources:  # must specify requests for CPU to autoscale
+          requests:
+            cpu: "250m"
+            memory: "100Mi"
+        livenessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 80
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 1
+          failureThreshold: 3
+
+---
+apiVersion: autoscaling/v2beta2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: server-a
+  namespace: development
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: server-a
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 80
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: AverageValue
+        averageValue: 100Mi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: server-a
+  namespace: development
+spec:
+  selector: 
+    app: server-a
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 80
